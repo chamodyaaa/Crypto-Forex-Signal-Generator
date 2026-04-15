@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 from binance.client import Client
+from dotenv import load_dotenv
 import os
 
 #Binance client
@@ -44,14 +45,16 @@ def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h",limit=500):
     return df
 
 #Fetch Forex Data
-
-    def fetch_forex_data(symbol):
-      url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1h&apikey={API_KEY}"
-      response=requests.get(url)
-      data=response.json()
+def fetch_forex_data(symbol, timeframe="1h", limit=500):
+    url = (
+        f"https://api.twelvedata.com/time_series?symbol={symbol}"
+        f"&interval={timeframe}&outputsize={limit}&apikey={API_KEY}"
+    )
+    response = requests.get(url)
+    data = response.json()
 
     if "values" not in data:
-        raise Exception("Error fetching forex data:", data)
+        raise Exception(f"Error fetching forex data: {data}")
      
     df=pd.DataFrame(data["values"])
 
