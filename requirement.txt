@@ -8,3 +8,4 @@ streamlit
 plotly
 requests
 python-binance
+flask

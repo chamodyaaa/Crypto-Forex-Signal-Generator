@@ -145,3 +145,49 @@ if __name__ == "__main__":
 	print("Classification report:")
 	print(report)
 	print(f"Model saved to: {saved_path}")
+
+#Load Model
+
+def load_model(file_path:str="models/model.pkl") -> RandomForestClassifier:
+	"""Load saved model from disk"""
+	path = Path(file_path)
+
+	if not path.exists():
+		raise FileNotFoundError(f"Model not found at {file_path}")
+
+	model = joblib.load(path)
+	return model
+
+#Predict Signal
+def predict_signal(model: RandomForestClassifier, df: pd.DataFrame) -> int:
+	"""Predict trading signal using the trained model."""
+	X = df[FEATURE_COLUMNS].tail(1)
+
+	prediction = model.predict(X)[0]
+
+	return int(prediction)
+
+#Add Confidence
+
+def predict_with_confidence(
+	model: RandomForestClassifier,
+	df: pd.DataFrame
+) -> tuple[str, float]:
+	"""Predict signal and return probability confidence."""
+
+	X = df[FEATURE_COLUMNS].tail(1)
+
+	prediction = model.predict(X)[0]
+
+	probabilities = model.predict_proba(X)[0]
+
+	confidence = float(max(probabilities))
+
+	if prediction == 1:
+		signal = "BUY"
+	elif prediction == -1:
+		signal = "SELL"
+	else:
+		signal = "HOLD"
+
+	return signal, confidence
