@@ -7,6 +7,15 @@ import traceback
 
 app = Flask(__name__)
 
+
+@app.after_request
+def add_cors_headers(response):
+    """Allow the React frontend to call the API during development."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
 # Available trading pairs
 CRYPTO_PAIRS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", 

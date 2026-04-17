@@ -4,6 +4,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
@@ -20,6 +21,21 @@ FEATURE_COLUMNS = [
 	"macd_signal",
 	"macd_histogram",
 ]
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_model_path(file_path: str) -> Path:
+	"""Resolve model paths relative to the project root by default."""
+	path = Path(file_path)
+	if path.is_absolute():
+		return path
+
+	cwd_path = Path.cwd() / path
+	if cwd_path.exists():
+		return cwd_path
+
+	return PROJECT_ROOT / path
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,8 +90,8 @@ def prepare_dataset(
 	return df
 
 
-def train_model(dataset: pd.DataFrame) -> tuple[RandomForestClassifier, dict[str, float], str]:
-	"""Train and evaluate a Random Forest classifier."""
+def train_model(dataset: pd.DataFrame) -> tuple[CalibratedClassifierCV, dict[str, float], str]:
+	"""Train and evaluate a calibrated Random Forest classifier."""
 	X = dataset[FEATURE_COLUMNS]
 	y = dataset["label"]
 
@@ -87,13 +103,26 @@ def train_model(dataset: pd.DataFrame) -> tuple[RandomForestClassifier, dict[str
 		stratify=y if y.nunique() > 1 else None,
 	)
 
-	model = RandomForestClassifier(
+	base_model = RandomForestClassifier(
 		n_estimators=300,
 		max_depth=10,
 		min_samples_split=5,
 		random_state=42,
 	)
-	model.fit(X_train, y_train)
+	class_counts = y_train.value_counts()
+	min_class_count = int(class_counts.min()) if not class_counts.empty else 0
+
+	if min_class_count >= 2:
+		cv_folds = min(5, min_class_count)
+		model = CalibratedClassifierCV(
+			estimator=base_model,
+			method="sigmoid",
+			cv=cv_folds,
+		)
+		model.fit(X_train, y_train)
+	else:
+		base_model.fit(X_train, y_train)
+		model = base_model
 
 	y_pred = model.predict(X_test)
 	accuracy = accuracy_score(y_test, y_pred)
@@ -103,9 +132,9 @@ def train_model(dataset: pd.DataFrame) -> tuple[RandomForestClassifier, dict[str
 	return model, metrics, report
 
 
-def save_model(model: RandomForestClassifier, file_path: str = "models/model.pkl") -> Path:
+def save_model(model: CalibratedClassifierCV, file_path: str = "models/model.pkl") -> Path:
 	"""Persist trained model to disk for later inference."""
-	path = Path(file_path)
+	path = _resolve_model_path(file_path)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	joblib.dump(model, path)
 	return path
@@ -117,7 +146,7 @@ def run_training_pipeline(
 	timeframe: str = "1h",
 	limit: int = 1000,
 	model_path: str = "models/model.pkl",
-) -> tuple[RandomForestClassifier, dict[str, float], str, Path]:
+) -> tuple[CalibratedClassifierCV, dict[str, float], str, Path]:
 	"""End-to-end pipeline: dataset -> labels -> train -> evaluate -> save."""
 	dataset = prepare_dataset(
 		asset_type=asset_type,
@@ -148,9 +177,9 @@ if __name__ == "__main__":
 
 #Load Model
 
-def load_model(file_path:str="models/model.pkl") -> RandomForestClassifier:
+def load_model(file_path:str="models/model.pkl"):
 	"""Load saved model from disk"""
-	path = Path(file_path)
+	path = _resolve_model_path(file_path)
 
 	if not path.exists():
 		raise FileNotFoundError(f"Model not found at {file_path}")
@@ -159,7 +188,7 @@ def load_model(file_path:str="models/model.pkl") -> RandomForestClassifier:
 	return model
 
 #Predict Signal
-def predict_signal(model: RandomForestClassifier, df: pd.DataFrame) -> int:
+def predict_signal(model, df: pd.DataFrame) -> int:
 	"""Predict trading signal using the trained model."""
 	X = df[FEATURE_COLUMNS].tail(1)
 
@@ -167,10 +196,15 @@ def predict_signal(model: RandomForestClassifier, df: pd.DataFrame) -> int:
 
 	return int(prediction)
 
+
+def adjust_confidence(confidence: float, shrink_factor: float = 0.7) -> float:
+	"""Shrink overconfident probabilities toward a neutral 50% baseline."""
+	return 0.5 + (confidence - 0.5) * shrink_factor
+
 #Add Confidence
 
 def predict_with_confidence(
-	model: RandomForestClassifier,
+	model,
 	df: pd.DataFrame
 ) -> tuple[str, float]:
 	"""Predict signal and return probability confidence."""
@@ -178,10 +212,9 @@ def predict_with_confidence(
 	X = df[FEATURE_COLUMNS].tail(1)
 
 	prediction = model.predict(X)[0]
-
 	probabilities = model.predict_proba(X)[0]
-
-	confidence = float(max(probabilities))
+	probability_by_class = dict(zip(model.classes_, probabilities))
+	confidence = float(probability_by_class.get(prediction, 0.0))
 
 	if prediction == 1:
 		signal = "BUY"
