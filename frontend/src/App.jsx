@@ -65,6 +65,8 @@ export default function App() {
   const [loadingSymbols, setLoadingSymbols] = useState(false);
   const [running, setRunning] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [analyses, setAnalyses] = useState([]);
+  const [selectedAnalysisSymbol, setSelectedAnalysisSymbol] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -157,22 +159,60 @@ export default function App() {
   const handleRunAnalysis = async () => {
     setRunning(true);
     setError("");
+    setAnalyses([]);
+    setSelectedAnalysisSymbol(null);
 
     try {
-      const data = await fetchJson("/api/signal", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          asset_type: assetType,
-          symbol,
-          timeframe,
-        }),
-      });
+      // Parse comma-separated symbols from search or use single symbol
+      let symbolsToAnalyze = [];
+      
+      if (search.trim()) {
+        // Parse comma-separated symbols
+        symbolsToAnalyze = search
+          .split(",")
+          .map(s => s.trim().toUpperCase())
+          .filter(s => s.length > 0);
+      } else {
+        // Use currently selected symbol
+        symbolsToAnalyze = [symbol];
+      }
 
-      setAnalysis(data);
+      // Fetch analysis for each symbol
+      const results = [];
+      for (const sym of symbolsToAnalyze) {
+        try {
+          const data = await fetchJson("/api/signal", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              asset_type: assetType,
+              symbol: sym,
+              timeframe,
+            }),
+          });
+          results.push({ symbol: sym, data });
+        } catch (err) {
+          results.push({ symbol: sym, error: err.message });
+        }
+      }
+
+      // Set analyses results
+      setAnalyses(results);
+      
+      // Select first successful analysis or first one if all failed
+      const firstValid = results.find(r => !r.error);
+      if (firstValid) {
+        setSelectedAnalysisSymbol(firstValid.symbol);
+        setSymbol(firstValid.symbol);
+        setAnalysis(firstValid.data);
+      } else if (results.length > 0) {
+        setSelectedAnalysisSymbol(results[0].symbol);
+        setAnalysis(null);
+      }
     } catch (requestError) {
+      setAnalyses([]);
       setAnalysis(null);
       setError(requestError.message);
     } finally {
@@ -232,15 +272,15 @@ export default function App() {
             </label>
 
             <label className="full-width">
-              <span>Search Symbol</span>
+              <span>Search Symbol(s) - Enter any crypto/forex pair</span>
               <input
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={
                   assetType === "crypto"
-                    ? "Search BTC, ETH, SOL..."
-                    : "Search EUR, GBP, JPY..."
+                    ? "Examples: BTCUSDT, ETHUSDT, ADAUSDT, SOLUSDT (or any pair)"
+                    : "Examples: EUR/USD, GBP/USD, USD/JPY (or any pair)"
                 }
               />
             </label>
@@ -276,8 +316,8 @@ export default function App() {
               {running ? "Running Analysis..." : "Run Analysis"}
             </button>
             <div className="helper-text">
-              TradingView chart updates automatically for{" "}
-              {assetType === "crypto" ? "crypto" : "forex"} assets.
+              💡 Type any symbol in the search field above to analyze, or select from dropdown.
+              Use commas to analyze multiple pairs: ETHUSDT,BNBUSDT or EUR/USD,GBP/USD
             </div>
           </div>
 
@@ -302,48 +342,115 @@ export default function App() {
           <div className="card result-card">
             <div className="section-title">
               <h2>Latest Analysis</h2>
-              <span>{analysis ? "Live result" : "Waiting for a run"}</span>
+              <span>{analyses.length > 0 ? `${analyses.length} result${analyses.length > 1 ? 's' : ''}` : "Waiting for a run"}</span>
             </div>
 
-            {analysis ? (
+            {analyses.length > 0 ? (
               <>
-                <div
-                  className={`signal-badge signal-${formatSignal(analysis.signal?.rule_signal || "HOLD").toLowerCase()}`}
-                >
-                  {formatSignal(analysis.signal?.rule_signal)}
-                </div>
+                {/* Symbol tabs for multiple analyses */}
+                {analyses.length > 1 && (
+                  <div className="symbol-tabs">
+                    {analyses.map((result) => (
+                      <button
+                        key={result.symbol}
+                        className={`tab ${selectedAnalysisSymbol === result.symbol ? 'active' : ''} ${result.error ? 'error' : ''}`}
+                        onClick={() => {
+                          setSelectedAnalysisSymbol(result.symbol);
+                          setSymbol(result.symbol);
+                          setAnalysis(result.data);
+                        }}
+                      >
+                        {result.symbol}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                <div className="result-grid">
-                  <div>
-                    <span>ML Signal</span>
-                    <strong>{formatSignal(analysis.signal?.ml_signal)}</strong>
-                  </div>
-                  <div>
-                    <span>Confidence</span>
-                    <strong>{analysis.signal?.confidence ?? 0}%</strong>
-                  </div>
-                  <div>
-                    <span>Price</span>
-                    <strong>{analysis.signal?.price ?? "N/A"}</strong>
-                  </div>
-                  <div>
-                    <span>RSI</span>
-                    <strong>{analysis.signal?.rsi ?? "N/A"}</strong>
-                  </div>
-                  <div>
-                    <span>EMA 20</span>
-                    <strong>{analysis.signal?.ema ?? "N/A"}</strong>
-                  </div>
-                  <div>
-                    <span>MACD</span>
-                    <strong>{analysis.signal?.macd ?? "N/A"}</strong>
-                  </div>
-                </div>
+                {/* Display selected analysis or first one */}
+                {(() => {
+                  const current = selectedAnalysisSymbol 
+                    ? analyses.find(r => r.symbol === selectedAnalysisSymbol)
+                    : analyses[0];
+                  
+                  if (!current) return null;
+                  
+                  if (current.error) {
+                    return (
+                      <div className="notice error">
+                        Error analyzing {current.symbol}: {current.error}
+                      </div>
+                    );
+                  }
 
-                <div className="reason-box">
-                  <span>Reason</span>
-                  <p>{analysis.signal?.reason || "No reason returned."}</p>
-                </div>
+                  const analysisData = current.data;
+                  const finalSignal = analysisData.signal?.final_signal || analysisData.signal?.rule_signal || "HOLD";
+                  
+                  return (
+                    <>
+                      {/* Final Combined Signal Badge */}
+                      <div
+                        className={`signal-badge signal-${formatSignal(finalSignal).toLowerCase()}`}
+                      >
+                        {formatSignal(finalSignal)}
+                      </div>
+
+                      {/* Signal Signals Comparison */}
+                      <div className="signals-comparison">
+                        <div className="signal-item">
+                          <span className="label">Rule-Based</span>
+                          <strong className={`signal-text signal-${formatSignal(analysisData.signal?.rule_signal).toLowerCase()}`}>
+                            {formatSignal(analysisData.signal?.rule_signal)}
+                          </strong>
+                        </div>
+                        <div className="signal-item">
+                          <span className="label">ML Prediction</span>
+                          <strong className={`signal-text signal-${formatSignal(analysisData.signal?.ml_signal).toLowerCase()}`}>
+                            {formatSignal(analysisData.signal?.ml_signal)}
+                          </strong>
+                        </div>
+                        <div className="signal-item">
+                          <span className="label">Final Decision</span>
+                          <strong className={`signal-text signal-${formatSignal(finalSignal).toLowerCase()}`}>
+                            {formatSignal(finalSignal)}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="result-grid">
+                        <div>
+                          <span>Rule-Based Confidence</span>
+                          <strong>{analysisData.signal?.rule_confidence ?? 0}%</strong>
+                        </div>
+                        <div>
+                          <span>ML Confidence</span>
+                          <strong>{analysisData.signal?.ml_confidence ?? 0}%</strong>
+                        </div>
+                        <div>
+                          <span>Combined Confidence</span>
+                          <strong>{analysisData.signal?.combined_confidence ?? 0}%</strong>
+                        </div>
+                        <div>
+                          <span>Price</span>
+                          <strong>{analysisData.signal?.price ?? "N/A"}</strong>
+                        </div>
+                        <div>
+                          <span>RSI</span>
+                          <strong>{analysisData.signal?.rsi ?? "N/A"}</strong>
+                        </div>
+                        <div>
+                          <span>EMA 20</span>
+                          <strong>{analysisData.signal?.ema ?? "N/A"}</strong>
+                        </div>
+                      </div>
+
+                      {/* Combined Reason */}
+                      <div className="reason-box">
+                        <span>Decision Logic</span>
+                        <p>{analysisData.signal?.combined_reason || analysisData.signal?.reason || "No reason returned."}</p>
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             ) : (
               <div className="empty-state">
