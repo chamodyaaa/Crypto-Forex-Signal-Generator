@@ -50,20 +50,23 @@ def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
 	"""Create rule-based labels: 1=buy, -1=sell, 0=hold."""
 	result = df.copy()
 
+	# More flexible BUY conditions - easier to trigger
 	buy_rule = (
-		(result["rsi"] < 35)
-		& (result["close"] > result["ema_20"])
-		& (result["macd"] > result["macd_signal"])
+		((result["rsi"] < 40) & (result["macd"] > result["macd_signal"])) |  # RSI approaching oversold + bullish MACD
+		((result["rsi"] < 30) & (result["close"] > result["ema_20"])) |  # Oversold + price above EMA
+		((result["rsi"] > 50) & (result["rsi"] < 60) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"]))  # Neutral RSI but bullish technicals
 	)
+	
+	# More flexible SELL conditions - easier to trigger
 	sell_rule = (
-		(result["rsi"] > 65)
-		& (result["close"] < result["ema_20"])
-		& (result["macd"] < result["macd_signal"])
+		((result["rsi"] > 60) & (result["macd"] < result["macd_signal"])) |  # RSI approaching overbought + bearish MACD
+		((result["rsi"] > 70) & (result["close"] < result["ema_20"])) |  # Overbought + price below EMA
+		((result["rsi"] > 40) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"]))  # Neutral RSI but bearish technicals
 	)
 
-	result["label"] = 0
-	result.loc[buy_rule, "label"] = 1
-	result.loc[sell_rule, "label"] = -1
+	result["label"] = 0  # Default to HOLD
+	result.loc[sell_rule, "label"] = -1  # Apply SELL first
+	result.loc[buy_rule & ~sell_rule, "label"] = 1  # Apply BUY if not already SELL
 
 	return result
 
@@ -103,11 +106,24 @@ def train_model(dataset: pd.DataFrame) -> tuple[CalibratedClassifierCV, dict[str
 		stratify=y if y.nunique() > 1 else None,
 	)
 
+	# Calculate class weights to handle imbalance
+	from sklearn.utils.class_weight import compute_class_weight
+	import numpy as np
+	
+	unique_classes = np.array(sorted(y_train.unique()))
+	class_weights = compute_class_weight(
+		'balanced',
+		classes=unique_classes,
+		y=y_train
+	)
+	class_weight_dict = dict(zip(unique_classes, class_weights))
+
 	base_model = RandomForestClassifier(
 		n_estimators=300,
 		max_depth=10,
 		min_samples_split=5,
 		random_state=42,
+		class_weight=class_weight_dict,  # Apply class weights
 	)
 	class_counts = y_train.value_counts()
 	min_class_count = int(class_counts.min()) if not class_counts.empty else 0
@@ -213,8 +229,11 @@ def predict_with_confidence(
 
 	prediction = model.predict(X)[0]
 	probabilities = model.predict_proba(X)[0]
-	probability_by_class = dict(zip(model.classes_, probabilities))
-	confidence = float(probability_by_class.get(prediction, 0.0))
+	
+	# Get the index of the predicted class
+	class_index = list(model.classes_).index(prediction)
+	# Get the probability for the predicted class
+	confidence = float(probabilities[class_index])
 
 	if prediction == 1:
 		signal = "BUY"

@@ -48,7 +48,7 @@ def get_timeframes():
 
 @app.route("/api/symbols", methods=["GET"])
 def get_symbols():
-    """Get symbols by asset type, optionally filtered by search query."""
+    """Get symbol suggestions by asset type, optionally filtered by search query."""
     asset_type = request.args.get("asset_type", "crypto").lower()
     search = request.args.get("search", "").strip().upper()
     
@@ -66,7 +66,8 @@ def get_symbols():
     return jsonify({
         "asset_type": asset_type,
         "symbols": symbols,
-        "count": len(symbols)
+        "count": len(symbols),
+        "note": "These are suggested pairs. You can enter any valid symbol."
     })
 
 
@@ -90,11 +91,8 @@ def get_signal():
         if timeframe not in TIMEFRAMES:
             return jsonify({"error": f"Invalid timeframe. Must be one of: {TIMEFRAMES}"}), 400
         
-        # Validate symbol
-        if asset_type == "crypto" and symbol not in CRYPTO_PAIRS:
-            return jsonify({"error": f"Invalid crypto symbol. Available: {CRYPTO_PAIRS}"}), 400
-        if asset_type == "forex" and symbol not in FOREX_PAIRS:
-            return jsonify({"error": f"Invalid forex symbol. Available: {FOREX_PAIRS}"}), 400
+        # Note: Symbol validation is removed to allow custom symbols
+        # The data fetcher will handle validation and throw appropriate errors
         
         print(f"\nProcessing: {symbol} ({asset_type}) - Timeframe: {timeframe}")
         

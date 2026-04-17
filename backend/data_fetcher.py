@@ -4,18 +4,35 @@ from binance.client import Client
 from dotenv import load_dotenv
 import os
 
-#Binance client
-client=Client()
-
 # load .env file
 load_dotenv()
+
+# Lazy-loaded Binance client
+_client = None
+
+def get_binance_client():
+    global _client
+    if _client is None:
+        try:
+            _client = Client()
+        except Exception as e:
+            print(f"Warning: Failed to initialize Binance client: {e}")
+            print("Running in offline mode")
+            _client = None
+    return _client
+
+client = None  # Will be initialized on first use
 
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 
 #Fetch Crypto Data
 
 def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h",limit=500):
-    klines=client.get_klines(
+    binance_client = get_binance_client()
+    if binance_client is None:
+        raise Exception("Binance client not available - network connection failed")
+    
+    klines=binance_client.get_klines(
         symbol=symbol,
         interval=timeframe,
         limit=limit
@@ -46,9 +63,12 @@ def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h",limit=500):
 
 #Fetch Forex Data
 def fetch_forex_data(symbol, timeframe="1h", limit=500):
+    # Convert timeframe to Twelve Data API format
+    forex_timeframe = convert_timeframe_for_forex(timeframe)
+    
     url = (
         f"https://api.twelvedata.com/time_series?symbol={symbol}"
-        f"&interval={timeframe}&outputsize={limit}&apikey={API_KEY}"
+        f"&interval={forex_timeframe}&outputsize={limit}&apikey={API_KEY}"
     )
     response = requests.get(url)
     data = response.json()
@@ -77,6 +97,22 @@ def fetch_forex_data(symbol, timeframe="1h", limit=500):
 
     return df
 
+
+
+# Timeframe conversion for Forex API
+def convert_timeframe_for_forex(timeframe):
+    """Convert timeframe from crypto format to Twelve Data forex format."""
+    timeframe_map = {
+        "1m": "1min",
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "4h": "4h",
+        "1d": "1day",
+        "1w": "1week",
+    }
+    return timeframe_map.get(timeframe, timeframe)
 
 
 # Main Function 

@@ -56,6 +56,20 @@ export default function TradingViewChart({ assetType, symbol, timeframe }) {
         hide_top_toolbar: false,
         hide_legend: false,
         save_image: false,
+        studies: [
+          "MASimple@tv-basicstudies",
+          "RSI@tv-basicstudies"
+        ],
+        studies_overrides: [
+          {
+            "MASimple@tv-basicstudies.Plot.linewidth": 2,
+            "MASimple@tv-basicstudies.Plot.color": "#2962FF",
+            "MASimple@tv-basicstudies.length": 20,
+            "RSI@tv-basicstudies.RSI.linewidth": 2,
+            "RSI@tv-basicstudies.RSI.color": "#FF6B35",
+            "RSI@tv-basicstudies.length": 14,
+          }
+        ],
       });
     };
 
