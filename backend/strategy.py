@@ -20,39 +20,53 @@ def generate_signal(df: pd.DataFrame) -> dict:
     signal = "HOLD"
     reason = "No clear signal"
     rule_confidence = 0.0  # Confidence for rule-based signal
+    macd_gap = macd - macd_signal
+    ema_gap_pct = ((price - ema) / ema) if ema else 0.0
 
     # RULE BASED LOGIC with improved thresholds
     # BUY signals (multiple conditions)
     buy_conditions = [
-        rsi < 35 and macd > macd_signal,  # Oversold + Bullish MACD
-        rsi < 40 and price > ema and macd > macd_signal,  # Approaching oversold with bullish setup
-        rsi > 50 and rsi < 60 and macd > macd_signal and price > ema,  # Neutral RSI with bullish technicals
+        rsi <= 35 and macd_gap > -0.0003,  # Allow early momentum turns near oversold
+        rsi < 48 and ema_gap_pct > -0.001 and macd_gap > 0,  # Slightly below EMA still allowed if momentum improves
+        48 <= rsi <= 65 and ema_gap_pct > 0.0005 and macd_gap > 0,  # Less strict continuation threshold
     ]
     
     # SELL signals (multiple conditions)
     sell_conditions = [
-        rsi > 65 and macd < macd_signal,  # Overbought + Bearish MACD
-        rsi > 60 and price < ema and macd < macd_signal,  # Approaching overbought with bearish setup
-        rsi > 40 and rsi < 50 and macd < macd_signal and price < ema,  # Neutral RSI with bearish technicals
+        rsi >= 65 and macd_gap < 0.0003,  # Allow early momentum turns near overbought
+        rsi > 52 and ema_gap_pct < 0.001 and macd_gap < 0,  # Slightly above EMA still allowed if momentum weakens
+        35 <= rsi <= 52 and ema_gap_pct < -0.0005 and macd_gap < 0,  # Less strict continuation threshold
     ]
 
     if any(buy_conditions):
         signal = "BUY"
-        reason = f"RSI: {rsi:.2f} | MACD Bullish | EMA Setup"
+        reason = f"RSI: {rsi:.2f} | MACD Bullish (gap {macd_gap:.4f}) | EMA trend support"
         # Calculate confidence based on RSI extremeness and price vs EMA
         rsi_strength = abs(rsi - 50) / 50  # 0-1 scale, stronger at extremes
         price_ema_strength = abs(price - ema) / ema if ema != 0 else 0.1  # Strength of price separation
-        rule_confidence = min(80, (rsi_strength + price_ema_strength) * 50)  # Cap at 80%
+        momentum_strength = min(0.4, abs(macd_gap))
+        rule_confidence = min(85, (rsi_strength + price_ema_strength + momentum_strength) * 45)
     elif any(sell_conditions):
         signal = "SELL"
-        reason = f"RSI: {rsi:.2f} | MACD Bearish | EMA Setup"
+        reason = f"RSI: {rsi:.2f} | MACD Bearish (gap {macd_gap:.4f}) | EMA trend resistance"
         # Calculate confidence based on RSI extremeness and price vs EMA
         rsi_strength = abs(rsi - 50) / 50  # 0-1 scale, stronger at extremes
         price_ema_strength = abs(price - ema) / ema if ema != 0 else 0.1  # Strength of price separation
-        rule_confidence = min(80, (rsi_strength + price_ema_strength) * 50)  # Cap at 80%
+        momentum_strength = min(0.4, abs(macd_gap))
+        rule_confidence = min(85, (rsi_strength + price_ema_strength + momentum_strength) * 45)
     else:
-        reason = f"Neutral Signal (RSI: {rsi:.2f})"
-        rule_confidence = 30  # Low confidence for HOLD signals
+        # Mild trend fallback: reduce excessive HOLD when momentum and trend are aligned.
+        if macd_gap > 0 and ema_gap_pct > 0 and rsi >= 52:
+            signal = "BUY"
+            reason = f"Mild bullish trend fallback (RSI: {rsi:.2f}, MACD gap: {macd_gap:.4f})"
+            rule_confidence = 44
+        elif macd_gap < 0 and ema_gap_pct < 0 and rsi <= 48:
+            signal = "SELL"
+            reason = f"Mild bearish trend fallback (RSI: {rsi:.2f}, MACD gap: {macd_gap:.4f})"
+            rule_confidence = 44
+        else:
+            reason = f"Neutral Signal (RSI: {rsi:.2f})"
+            rule_confidence = 35  # Slightly higher neutral confidence to avoid over-penalizing hold context
 
     # ML MODEL PREDICTION
     try:
@@ -84,8 +98,13 @@ def generate_signal(df: pd.DataFrame) -> dict:
         # Average both confidences with boost for agreement
         combined_confidence = min(100, (rule_confidence + ml_confidence) / 2 + 15)
     else:
+        # If rule is neutral but ML is confidently directional, allow controlled ML override.
+        if signal == "HOLD" and ml_signal in ["BUY", "SELL"] and ml_confidence >= 58:
+            final_signal = ml_signal
+            combined_reason = f"Rule neutral, ML directional ({ml_confidence:.0f}%)"
+            combined_confidence = ml_confidence * 0.75 + rule_confidence * 0.25
         # Signals disagree - use weighted approach
-        if ml_confidence > 60:
+        elif ml_confidence > 60:
             # ML model is confident - prioritize ML signal
             final_signal = ml_signal
             combined_reason = f"ML system ({ml_confidence:.0f}% confidence) overrides rule-based ({signal} {rule_confidence:.0f}%)"
@@ -106,7 +125,6 @@ def generate_signal(df: pd.DataFrame) -> dict:
                 final_signal = "HOLD"
                 combined_reason = f"Both systems weak - Rule: {signal} ({rule_confidence:.0f}%), ML: {ml_signal} ({ml_confidence:.0f}%) - HOLD recommended"
                 combined_confidence = (rule_confidence + ml_confidence) / 2
-            combined_confidence = rule_confidence * 0.8 + confidence * 0.2
 
     return {
         "rule_signal": signal,

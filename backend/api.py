@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from data_fetcher import get_market_data
+from data_fetcher import DataFetchError, get_market_data
 from indicators import calculate_rsi, calculate_ema, calculate_macd
 from utils import validate_indicators
 from strategy import generate_signal
@@ -75,7 +75,7 @@ def get_symbols():
 def get_signal():
     """Get trading signal for a selected asset."""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         # Validate required fields
         asset_type = data.get("asset_type", "").lower()
@@ -105,6 +105,9 @@ def get_signal():
         
         if df.empty:
             return jsonify({"error": "No market data available for this symbol"}), 400
+
+        if len(df) < 35:
+            return jsonify({"error": f"Not enough candles returned ({len(df)}). Try another timeframe/symbol."}), 400
         
         # Calculate indicators
         df = calculate_rsi(df)
@@ -112,7 +115,7 @@ def get_signal():
         df = calculate_macd(df)
         
         # Validate indicators
-        validate_indicators(df)
+        validate_indicators(df, min_rows=35)
         
         # Generate signal
         signal = generate_signal(df)
@@ -132,6 +135,18 @@ def get_signal():
                 "volume": float(df.iloc[-1]["volume"]) if "volume" in df.columns else None
             }
         })
+
+    except DataFetchError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 502
+
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
         
     except Exception as e:
         print(f"ERROR: {str(e)}")
