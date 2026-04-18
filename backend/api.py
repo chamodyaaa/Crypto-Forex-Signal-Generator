@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from data_fetcher import DataFetchError, get_market_data
-from indicators import calculate_rsi, calculate_ema, calculate_macd
+from ml_model import add_indicators
 from utils import validate_indicators
 from strategy import generate_signal
 import traceback
@@ -109,10 +109,8 @@ def get_signal():
         if len(df) < 35:
             return jsonify({"error": f"Not enough candles returned ({len(df)}). Try another timeframe/symbol."}), 400
         
-        # Calculate indicators
-        df = calculate_rsi(df)
-        df = calculate_ema(df)
-        df = calculate_macd(df)
+        # Add all required indicators for ML model
+        df = add_indicators(df)
         
         # Validate indicators
         validate_indicators(df, min_rows=35)

@@ -220,7 +220,13 @@ def load_model(file_path:str="models/model.pkl"):
 #Predict Signal
 def predict_signal(model, df: pd.DataFrame) -> int:
 	"""Predict trading signal using the trained model."""
-	X = df[FEATURE_COLUMNS].tail(1)
+	# Drop rows with NaN values in required features
+	df_clean = df.dropna(subset=FEATURE_COLUMNS)
+	
+	if df_clean.empty:
+		raise ValueError("No valid data rows after removing NaN values")
+	
+	X = df_clean[FEATURE_COLUMNS].tail(1)
 
 	prediction = model.predict(X)[0]
 
@@ -239,7 +245,13 @@ def predict_with_confidence(
 ) -> tuple[str, float]:
 	"""Predict signal and return probability confidence."""
 
-	X = df[FEATURE_COLUMNS].tail(1)
+	# Drop rows with NaN values in required features
+	df_clean = df.dropna(subset=FEATURE_COLUMNS)
+	
+	if df_clean.empty:
+		raise ValueError("No valid data rows after removing NaN values")
+
+	X = df_clean[FEATURE_COLUMNS].tail(1)
 
 	prediction = model.predict(X)[0]
 	probabilities = model.predict_proba(X)[0]
