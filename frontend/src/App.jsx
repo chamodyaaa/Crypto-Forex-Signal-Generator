@@ -165,13 +165,13 @@ export default function App() {
     try {
       // Parse comma-separated symbols from search or use single symbol
       let symbolsToAnalyze = [];
-      
+
       if (search.trim()) {
         // Parse comma-separated symbols
         symbolsToAnalyze = search
           .split(",")
-          .map(s => s.trim().toUpperCase())
-          .filter(s => s.length > 0);
+          .map((s) => s.trim().toUpperCase())
+          .filter((s) => s.length > 0);
       } else {
         // Use currently selected symbol
         symbolsToAnalyze = [symbol];
@@ -200,9 +200,9 @@ export default function App() {
 
       // Set analyses results
       setAnalyses(results);
-      
+
       // Select first successful analysis or first one if all failed
-      const firstValid = results.find(r => !r.error);
+      const firstValid = results.find((r) => !r.error);
       if (firstValid) {
         setSelectedAnalysisSymbol(firstValid.symbol);
         setSymbol(firstValid.symbol);
@@ -316,8 +316,9 @@ export default function App() {
               {running ? "Running Analysis..." : "Run Analysis"}
             </button>
             <div className="helper-text">
-              💡 Type any symbol in the search field above to analyze, or select from dropdown.
-              Use commas to analyze multiple pairs: ETHUSDT,BNBUSDT or EUR/USD,GBP/USD
+              💡 Type any symbol in the search field above to analyze, or select
+              from dropdown. Use commas to analyze multiple pairs:
+              ETHUSDT,BNBUSDT or EUR/USD,GBP/USD
             </div>
           </div>
 
@@ -342,7 +343,11 @@ export default function App() {
           <div className="card result-card">
             <div className="section-title">
               <h2>Latest Analysis</h2>
-              <span>{analyses.length > 0 ? `${analyses.length} result${analyses.length > 1 ? 's' : ''}` : "Waiting for a run"}</span>
+              <span>
+                {analyses.length > 0
+                  ? `${analyses.length} result${analyses.length > 1 ? "s" : ""}`
+                  : "Waiting for a run"}
+              </span>
             </div>
 
             {analyses.length > 0 ? (
@@ -353,7 +358,7 @@ export default function App() {
                     {analyses.map((result) => (
                       <button
                         key={result.symbol}
-                        className={`tab ${selectedAnalysisSymbol === result.symbol ? 'active' : ''} ${result.error ? 'error' : ''}`}
+                        className={`tab ${selectedAnalysisSymbol === result.symbol ? "active" : ""} ${result.error ? "error" : ""}`}
                         onClick={() => {
                           setSelectedAnalysisSymbol(result.symbol);
                           setSymbol(result.symbol);
@@ -368,12 +373,12 @@ export default function App() {
 
                 {/* Display selected analysis or first one */}
                 {(() => {
-                  const current = selectedAnalysisSymbol 
-                    ? analyses.find(r => r.symbol === selectedAnalysisSymbol)
+                  const current = selectedAnalysisSymbol
+                    ? analyses.find((r) => r.symbol === selectedAnalysisSymbol)
                     : analyses[0];
-                  
+
                   if (!current) return null;
-                  
+
                   if (current.error) {
                     return (
                       <div className="notice error">
@@ -383,8 +388,11 @@ export default function App() {
                   }
 
                   const analysisData = current.data;
-                  const finalSignal = analysisData.signal?.final_signal || analysisData.signal?.rule_signal || "HOLD";
-                  
+                  const finalSignal =
+                    analysisData.signal?.final_signal ||
+                    analysisData.signal?.rule_signal ||
+                    "HOLD";
+
                   return (
                     <>
                       {/* Final Combined Signal Badge */}
@@ -398,19 +406,25 @@ export default function App() {
                       <div className="signals-comparison">
                         <div className="signal-item">
                           <span className="label">Rule-Based</span>
-                          <strong className={`signal-text signal-${formatSignal(analysisData.signal?.rule_signal).toLowerCase()}`}>
+                          <strong
+                            className={`signal-text signal-${formatSignal(analysisData.signal?.rule_signal).toLowerCase()}`}
+                          >
                             {formatSignal(analysisData.signal?.rule_signal)}
                           </strong>
                         </div>
                         <div className="signal-item">
                           <span className="label">ML Prediction</span>
-                          <strong className={`signal-text signal-${formatSignal(analysisData.signal?.ml_signal).toLowerCase()}`}>
+                          <strong
+                            className={`signal-text signal-${formatSignal(analysisData.signal?.ml_signal).toLowerCase()}`}
+                          >
                             {formatSignal(analysisData.signal?.ml_signal)}
                           </strong>
                         </div>
                         <div className="signal-item">
                           <span className="label">Final Decision</span>
-                          <strong className={`signal-text signal-${formatSignal(finalSignal).toLowerCase()}`}>
+                          <strong
+                            className={`signal-text signal-${formatSignal(finalSignal).toLowerCase()}`}
+                          >
                             {formatSignal(finalSignal)}
                           </strong>
                         </div>
@@ -419,15 +433,21 @@ export default function App() {
                       <div className="result-grid">
                         <div>
                           <span>Rule-Based Confidence</span>
-                          <strong>{analysisData.signal?.rule_confidence ?? 0}%</strong>
+                          <strong>
+                            {analysisData.signal?.rule_confidence ?? 0}%
+                          </strong>
                         </div>
                         <div>
                           <span>ML Confidence</span>
-                          <strong>{analysisData.signal?.ml_confidence ?? 0}%</strong>
+                          <strong>
+                            {analysisData.signal?.ml_confidence ?? 0}%
+                          </strong>
                         </div>
                         <div>
                           <span>Combined Confidence</span>
-                          <strong>{analysisData.signal?.combined_confidence ?? 0}%</strong>
+                          <strong>
+                            {analysisData.signal?.combined_confidence ?? 0}%
+                          </strong>
                         </div>
                         <div>
                           <span>Price</span>
@@ -439,14 +459,28 @@ export default function App() {
                         </div>
                         <div>
                           <span>EMA 20</span>
-                          <strong>{analysisData.signal?.ema ?? "N/A"}</strong>
+                          <strong>
+                            {analysisData.signal?.ema_20 ??
+                              analysisData.signal?.ema ??
+                              "N/A"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>EMA 50</span>
+                          <strong>
+                            {analysisData.signal?.ema_50 ?? "N/A"}
+                          </strong>
                         </div>
                       </div>
 
                       {/* Combined Reason */}
                       <div className="reason-box">
                         <span>Decision Logic</span>
-                        <p>{analysisData.signal?.combined_reason || analysisData.signal?.reason || "No reason returned."}</p>
+                        <p>
+                          {analysisData.signal?.combined_reason ||
+                            analysisData.signal?.reason ||
+                            "No reason returned."}
+                        </p>
                       </div>
                     </>
                   );

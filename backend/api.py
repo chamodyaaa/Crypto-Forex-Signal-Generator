@@ -111,7 +111,8 @@ def get_signal():
         
         # Calculate indicators
         df = calculate_rsi(df)
-        df = calculate_ema(df)
+        df = calculate_ema(df, span=20, output_col="ema_20")
+        df = calculate_ema(df, span=50, output_col="ema_50")
         df = calculate_macd(df)
         
         # Validate indicators

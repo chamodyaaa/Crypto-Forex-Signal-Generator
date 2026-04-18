@@ -56,18 +56,23 @@ def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
 	"""Create rule-based labels: 1=buy, -1=sell, 0=hold."""
 	result = df.copy()
 
+	trend_up = result["ema_20"] >= result["ema_50"]
+	trend_down = result["ema_20"] <= result["ema_50"]
+
 	# More flexible BUY conditions - easier to trigger
 	buy_rule = (
 		((result["rsi"] < 40) & (result["macd"] > result["macd_signal"])) |  # RSI approaching oversold + bullish MACD
 		((result["rsi"] < 30) & (result["close"] > result["ema_20"])) |  # Oversold + price above EMA
-		((result["rsi"] > 50) & (result["rsi"] < 60) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"]))  # Neutral RSI but bullish technicals
+		((result["rsi"] > 50) & (result["rsi"] < 60) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"])) |  # Neutral RSI but bullish technicals
+		((result["rsi"] >= 50) & trend_up & (result["close"] > result["ema_20"]) & (result["macd"] >= result["macd_signal"]))  # Trend continuation buy
 	)
 	
 	# More flexible SELL conditions - easier to trigger
 	sell_rule = (
 		((result["rsi"] > 60) & (result["macd"] < result["macd_signal"])) |  # RSI approaching overbought + bearish MACD
 		((result["rsi"] > 70) & (result["close"] < result["ema_20"])) |  # Overbought + price below EMA
-		((result["rsi"] > 40) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"]))  # Neutral RSI but bearish technicals
+		((result["rsi"] > 40) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"])) |  # Neutral RSI but bearish technicals
+		((result["rsi"] <= 50) & trend_down & (result["close"] < result["ema_20"]) & (result["macd"] <= result["macd_signal"]))  # Trend continuation sell
 	)
 
 	result["label"] = 0  # Default to HOLD
@@ -75,6 +80,33 @@ def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
 	result.loc[buy_rule & ~sell_rule, "label"] = 1  # Apply BUY if not already SELL
 
 	return result
+
+
+def rebalance_training_labels(
+	dataset: pd.DataFrame,
+	hold_label: int = 0,
+	max_hold_ratio: float = 0.45,
+	random_state: int = 42,
+) -> pd.DataFrame:
+	"""Downsample HOLD rows so training is less biased toward neutral predictions."""
+	if dataset.empty:
+		return dataset
+
+	hold_rows = dataset[dataset["label"] == hold_label]
+	directional_rows = dataset[dataset["label"] != hold_label]
+
+	if directional_rows.empty:
+		return dataset
+
+	max_hold_count = int((max_hold_ratio / max(1e-6, 1 - max_hold_ratio)) * len(directional_rows))
+	if len(hold_rows) <= max_hold_count:
+		return dataset
+
+	hold_sampled = hold_rows.sample(n=max_hold_count, random_state=random_state)
+	rebalanced = pd.concat([directional_rows, hold_sampled], axis=0)
+	rebalanced = rebalanced.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+
+	return rebalanced
 
 
 def prepare_dataset(
@@ -101,6 +133,8 @@ def prepare_dataset(
 
 def train_model(dataset: pd.DataFrame) -> tuple[CalibratedClassifierCV, dict[str, float], str]:
 	"""Train and evaluate a calibrated Random Forest classifier."""
+	dataset = rebalance_training_labels(dataset)
+
 	X = dataset[FEATURE_COLUMNS]
 	y = dataset["label"]
 
@@ -243,11 +277,25 @@ def predict_with_confidence(
 
 	prediction = model.predict(X)[0]
 	probabilities = model.predict_proba(X)[0]
-	
-	# Get the index of the predicted class
-	class_index = list(model.classes_).index(prediction)
-	# Get the probability for the predicted class
-	confidence = float(probabilities[class_index])
+	classes = list(model.classes_)
+	prob_map = {int(cls): float(probabilities[idx]) for idx, cls in enumerate(classes)}
+
+	confidence = prob_map.get(int(prediction), 0.0)
+
+	# Reduce HOLD bias: if HOLD is only slightly stronger than directional classes,
+	# emit the strongest directional class instead of staying neutral.
+	hold_prob = prob_map.get(0, 0.0)
+	buy_prob = prob_map.get(1, 0.0)
+	sell_prob = prob_map.get(-1, 0.0)
+	best_directional_class = 1 if buy_prob >= sell_prob else -1
+	best_directional_prob = max(buy_prob, sell_prob)
+	hold_advantage = hold_prob - best_directional_prob
+
+	if int(prediction) == 0:
+		adjusted_hold_prob = hold_prob * 0.92
+		if best_directional_prob >= adjusted_hold_prob or hold_advantage <= 0.06:
+			prediction = best_directional_class
+			confidence = best_directional_prob
 
 	if prediction == 1:
 		signal = "BUY"
