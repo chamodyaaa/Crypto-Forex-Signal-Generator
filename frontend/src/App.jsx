@@ -48,6 +48,25 @@ function formatSignal(signal) {
   return signal.toUpperCase();
 }
 
+function getSignalIcon(signal) {
+  const formatted = formatSignal(signal).toLowerCase();
+  const icons = {
+    buy: "📈",
+    sell: "📉",
+    hold: "⏸️",
+  };
+  return icons[formatted] || "⏸️";
+}
+
+function formatTime(date) {
+  if (!date) return "";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 export default function App() {
   const [assetType, setAssetType] = useState("crypto");
   const [timeframes, setTimeframes] = useState([
@@ -68,6 +87,7 @@ export default function App() {
   const [analyses, setAnalyses] = useState([]);
   const [selectedAnalysisSymbol, setSelectedAnalysisSymbol] = useState(null);
   const [error, setError] = useState("");
+  const [analysisTime, setAnalysisTime] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +181,7 @@ export default function App() {
     setError("");
     setAnalyses([]);
     setSelectedAnalysisSymbol(null);
+    setAnalysisTime(null);
 
     try {
       // Parse comma-separated symbols from search or use single symbol
@@ -200,6 +221,7 @@ export default function App() {
 
       // Set analyses results
       setAnalyses(results);
+      setAnalysisTime(new Date());
 
       // Select first successful analysis or first one if all failed
       const firstValid = results.find((r) => !r.error);
@@ -227,19 +249,29 @@ export default function App() {
 
       <main className="layout">
         <section className="hero card">
-          <div className="eyebrow">Crypto / Forex Intelligence</div>
-          <h1>Signal generator with live market context</h1>
+          <div className="eyebrow">📊 Crypto / Forex Intelligence</div>
+          <h1>AI-Powered Signal Generator</h1>
           <p>
-            Choose an asset, set the timeframe, then run analysis to fetch the
-            latest rule-based and ML-backed signal. The chart below stays synced
-            with the selected market.
+            Real-time market analysis with rule-based and machine learning
+            signals. Select your asset, timeframe, and run advanced technical
+            analysis to get actionable trading insights powered by live market
+            data.
           </p>
         </section>
 
         <section className="controls card">
           <div className="section-title">
-            <h2>Analysis Controls</h2>
-            <span>Backend connected</span>
+            <h2>Analysis Configuration</h2>
+            <span>
+              {running ? (
+                <>
+                  <span className="loading-spinner" />
+                  Analyzing...
+                </>
+              ) : (
+                <>✅ Connected</>
+              )}
+            </span>
           </div>
 
           <div className="form-grid">
@@ -272,15 +304,15 @@ export default function App() {
             </label>
 
             <label className="full-width">
-              <span>Search Symbol(s) - Enter any crypto/forex pair</span>
+              <span>Search Symbol(s)</span>
               <input
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={
                   assetType === "crypto"
-                    ? "Examples: BTCUSDT, ETHUSDT, ADAUSDT, SOLUSDT (or any pair)"
-                    : "Examples: EUR/USD, GBP/USD, USD/JPY (or any pair)"
+                    ? "E.g., BTCUSDT, ETHUSDT, ADAUSDT, SOLUSDT"
+                    : "E.g., EUR/USD, GBP/USD, USD/JPY"
                 }
               />
             </label>
@@ -313,12 +345,19 @@ export default function App() {
               onClick={handleRunAnalysis}
               disabled={running}
             >
-              {running ? "Running Analysis..." : "Run Analysis"}
+              {running ? (
+                <>
+                  <span className="loading-spinner" />
+                  Analyzing Market...
+                </>
+              ) : (
+                "🚀 Run Analysis"
+              )}
             </button>
             <div className="helper-text">
-              💡 Type any symbol in the search field above to analyze, or select
-              from dropdown. Use commas to analyze multiple pairs:
-              ETHUSDT,BNBUSDT or EUR/USD,GBP/USD
+              Analyze single or multiple pairs by entering comma-separated
+              symbols (e.g., ETHUSDT,BNBUSDT). Supports real-time data from
+              major exchanges.
             </div>
           </div>
 
@@ -342,13 +381,21 @@ export default function App() {
 
           <div className="card result-card">
             <div className="section-title">
-              <h2>Latest Analysis</h2>
+              <h2>Signal Analysis Results</h2>
               <span>
                 {analyses.length > 0
                   ? `${analyses.length} result${analyses.length > 1 ? "s" : ""}`
-                  : "Waiting for a run"}
+                  : "Awaiting analysis"}
               </span>
             </div>
+
+            {analysisTime && (
+              <div className="analysis-meta">
+                <span className="analysis-timestamp">
+                  📅 Analyzed at {formatTime(analysisTime)}
+                </span>
+              </div>
+            )}
 
             {analyses.length > 0 ? (
               <>
@@ -399,13 +446,13 @@ export default function App() {
                       <div
                         className={`signal-badge signal-${formatSignal(finalSignal).toLowerCase()}`}
                       >
-                        {formatSignal(finalSignal)}
+                        {getSignalIcon(finalSignal)} {formatSignal(finalSignal)}
                       </div>
 
                       {/* Signal Signals Comparison */}
                       <div className="signals-comparison">
                         <div className="signal-item">
-                          <span className="label">Rule-Based</span>
+                          <span className="label">📐 Rule-Based Signal</span>
                           <strong
                             className={`signal-text signal-${formatSignal(analysisData.signal?.rule_signal).toLowerCase()}`}
                           >
@@ -413,7 +460,7 @@ export default function App() {
                           </strong>
                         </div>
                         <div className="signal-item">
-                          <span className="label">ML Prediction</span>
+                          <span className="label">🤖 ML Prediction</span>
                           <strong
                             className={`signal-text signal-${formatSignal(analysisData.signal?.ml_signal).toLowerCase()}`}
                           >
@@ -421,7 +468,7 @@ export default function App() {
                           </strong>
                         </div>
                         <div className="signal-item">
-                          <span className="label">Final Decision</span>
+                          <span className="label">✨ Final Decision</span>
                           <strong
                             className={`signal-text signal-${formatSignal(finalSignal).toLowerCase()}`}
                           >
@@ -432,33 +479,33 @@ export default function App() {
 
                       <div className="result-grid">
                         <div>
-                          <span>Rule-Based Confidence</span>
+                          <span>📊 Rule Confidence</span>
                           <strong>
                             {analysisData.signal?.rule_confidence ?? 0}%
                           </strong>
                         </div>
                         <div>
-                          <span>ML Confidence</span>
+                          <span>🤖 ML Confidence</span>
                           <strong>
                             {analysisData.signal?.ml_confidence ?? 0}%
                           </strong>
                         </div>
                         <div>
-                          <span>Combined Confidence</span>
+                          <span>🎯 Combined Confidence</span>
                           <strong>
                             {analysisData.signal?.combined_confidence ?? 0}%
                           </strong>
                         </div>
                         <div>
-                          <span>Price</span>
+                          <span>💰 Current Price</span>
                           <strong>{analysisData.signal?.price ?? "N/A"}</strong>
                         </div>
                         <div>
-                          <span>RSI</span>
+                          <span>📈 RSI (14)</span>
                           <strong>{analysisData.signal?.rsi ?? "N/A"}</strong>
                         </div>
                         <div>
-                          <span>EMA 20</span>
+                          <span>🔄 EMA 20</span>
                           <strong>
                             {analysisData.signal?.ema_20 ??
                               analysisData.signal?.ema ??
@@ -466,7 +513,7 @@ export default function App() {
                           </strong>
                         </div>
                         <div>
-                          <span>EMA 50</span>
+                          <span>🔄 EMA 50</span>
                           <strong>
                             {analysisData.signal?.ema_50 ?? "N/A"}
                           </strong>
@@ -475,11 +522,11 @@ export default function App() {
 
                       {/* Combined Reason */}
                       <div className="reason-box">
-                        <span>Decision Logic</span>
+                        <span>🧠 Decision Logic</span>
                         <p>
                           {analysisData.signal?.combined_reason ||
                             analysisData.signal?.reason ||
-                            "No reason returned."}
+                            "Analysis reasoning not available."}
                         </p>
                       </div>
                     </>
@@ -488,8 +535,9 @@ export default function App() {
               </>
             ) : (
               <div className="empty-state">
-                Run an analysis to see the generated signal, confidence, and
-                indicator values here.
+                Select your trading pair, configure the timeframe, and click
+                "Run Analysis" to generate real-time trading signals and
+                technical analysis.
               </div>
             )}
           </div>
