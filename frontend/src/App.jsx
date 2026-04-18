@@ -439,7 +439,11 @@ export default function App() {
                         </div>
                         <div>
                           <span>EMA 20</span>
-                          <strong>{analysisData.signal?.ema ?? "N/A"}</strong>
+                          <strong>{analysisData.signal?.ema_20 ?? "N/A"}</strong>
+                        </div>
+                        <div>
+                          <span>EMA 50</span>
+                          <strong>{analysisData.signal?.ema_50 ?? "N/A"}</strong>
                         </div>
                       </div>
 

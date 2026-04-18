@@ -53,26 +53,26 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
-	"""Create rule-based labels: 1=buy, -1=sell, 0=hold."""
+	"""Create rule-based labels: 1=buy, -1=sell, 0=hold - Balanced with dual EMA."""
 	result = df.copy()
 
-	# More flexible BUY conditions - easier to trigger
+	# BUY: Price momentum + RSI + dual EMA alignment
 	buy_rule = (
-		((result["rsi"] < 40) & (result["macd"] > result["macd_signal"])) |  # RSI approaching oversold + bullish MACD
-		((result["rsi"] < 30) & (result["close"] > result["ema_20"])) |  # Oversold + price above EMA
-		((result["rsi"] > 50) & (result["rsi"] < 60) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"]))  # Neutral RSI but bullish technicals
+		((result["rsi"] < 40) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"])) |  # Oversold + bullish momentum + above EMA20
+		((result["rsi"] < 35) & (result["macd"] > result["macd_signal"])) |  # Very oversold + MACD bullish
+		((result["rsi"] > 50) & (result["rsi"] < 65) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_50"]) & (result["return_1"] > 0))  # Strong bullish trend with both EMAs
 	)
 	
-	# More flexible SELL conditions - easier to trigger
+	# SELL: Price momentum + RSI + dual EMA alignment  
 	sell_rule = (
-		((result["rsi"] > 60) & (result["macd"] < result["macd_signal"])) |  # RSI approaching overbought + bearish MACD
-		((result["rsi"] > 70) & (result["close"] < result["ema_20"])) |  # Overbought + price below EMA
-		((result["rsi"] > 40) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"]))  # Neutral RSI but bearish technicals
+		((result["rsi"] > 60) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"])) |  # Overbought + bearish momentum + below EMA20
+		((result["rsi"] > 65) & (result["macd"] < result["macd_signal"])) |  # Very overbought + MACD bearish
+		((result["rsi"] > 35) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_50"]) & (result["return_1"] < 0))  # Strong bearish trend with both EMAs
 	)
 
 	result["label"] = 0  # Default to HOLD
-	result.loc[sell_rule, "label"] = -1  # Apply SELL first
-	result.loc[buy_rule & ~sell_rule, "label"] = 1  # Apply BUY if not already SELL
+	result.loc[sell_rule, "label"] = -1  # Apply SELL
+	result.loc[buy_rule & ~sell_rule, "label"] = 1  # Apply BUY if not SELL
 
 	return result
 

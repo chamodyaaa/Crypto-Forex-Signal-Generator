@@ -13,15 +13,22 @@ def generate_signal(df: pd.DataFrame) -> dict:
 
     price = latest["close"]
     rsi = latest["rsi"]
-    ema = latest["ema_20"]
+    ema_20 = latest.get("ema_20", float('nan'))
+    ema_50 = latest.get("ema_50", float('nan'))
     macd = latest["macd"]
     macd_signal = latest["macd_signal"]
+    
+    # Handle NaN values for EMAs
+    if pd.isna(ema_20):
+        ema_20 = price  # Fallback to price if EMA not ready
+    if pd.isna(ema_50):
+        ema_50 = price  # Fallback to price if EMA not ready
 
     signal = "HOLD"
     reason = "No clear signal"
     rule_confidence = 0.0  # Confidence for rule-based signal
     macd_gap = macd - macd_signal
-    ema_gap_pct = ((price - ema) / ema) if ema else 0.0
+    ema_gap_pct = ((price - ema_20) / ema_20) if ema_20 else 0.0
 
     # RULE BASED LOGIC with improved thresholds
     # BUY signals (multiple conditions)
@@ -41,17 +48,17 @@ def generate_signal(df: pd.DataFrame) -> dict:
     if any(buy_conditions):
         signal = "BUY"
         reason = f"RSI: {rsi:.2f} | MACD Bullish (gap {macd_gap:.4f}) | EMA trend support"
-        # Calculate confidence based on RSI extremeness and price vs EMA
+        # Calculate confidence based on RSI extremeness and price vs EMA20
         rsi_strength = abs(rsi - 50) / 50  # 0-1 scale, stronger at extremes
-        price_ema_strength = abs(price - ema) / ema if ema != 0 else 0.1  # Strength of price separation
+        price_ema_strength = abs(price - ema_20) / ema_20 if ema_20 != 0 else 0.1  # Strength of price separation
         momentum_strength = min(0.4, abs(macd_gap))
         rule_confidence = min(85, (rsi_strength + price_ema_strength + momentum_strength) * 45)
     elif any(sell_conditions):
         signal = "SELL"
         reason = f"RSI: {rsi:.2f} | MACD Bearish (gap {macd_gap:.4f}) | EMA trend resistance"
-        # Calculate confidence based on RSI extremeness and price vs EMA
+        # Calculate confidence based on RSI extremeness and price vs EMA20
         rsi_strength = abs(rsi - 50) / 50  # 0-1 scale, stronger at extremes
-        price_ema_strength = abs(price - ema) / ema if ema != 0 else 0.1  # Strength of price separation
+        price_ema_strength = abs(price - ema_20) / ema_20 if ema_20 != 0 else 0.1  # Strength of price separation
         momentum_strength = min(0.4, abs(macd_gap))
         rule_confidence = min(85, (rsi_strength + price_ema_strength + momentum_strength) * 45)
     else:
@@ -147,7 +154,9 @@ def generate_signal(df: pd.DataFrame) -> dict:
         "combined_confidence": round(min(100, combined_confidence), 2),
         "price": float(round(price, 2)),
         "rsi": float(round(rsi, 2)),
-        "ema": float(round(ema, 2)),
+        "ema": float(round(ema_20, 2)),
+        "ema_20": float(round(ema_20, 2)),
+        "ema_50": float(round(ema_50, 2)),
         "macd": float(round(macd, 4)),
         "macd_signal": float(round(macd_signal, 4)),
         "reason": reason,

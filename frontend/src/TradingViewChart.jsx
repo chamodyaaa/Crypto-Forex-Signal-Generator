@@ -57,14 +57,18 @@ export default function TradingViewChart({ assetType, symbol, timeframe }) {
         hide_legend: false,
         save_image: false,
         studies: [
-          "MASimple@tv-basicstudies",
+          "EMA@tv-basicstudies!EMA1",
+          "EMA@tv-basicstudies!EMA2",
           "RSI@tv-basicstudies"
         ],
         studies_overrides: [
           {
-            "MASimple@tv-basicstudies.Plot.linewidth": 2,
-            "MASimple@tv-basicstudies.Plot.color": "#2962FF",
-            "MASimple@tv-basicstudies.length": 20,
+            "EMA@tv-basicstudies!EMA1.Plot.linewidth": 2,
+            "EMA@tv-basicstudies!EMA1.Plot.color": "#FF5733",
+            "EMA@tv-basicstudies!EMA1.length": 20,
+            "EMA@tv-basicstudies!EMA2.Plot.linewidth": 2,
+            "EMA@tv-basicstudies!EMA2.Plot.color": "#FFA500",
+            "EMA@tv-basicstudies!EMA2.length": 50,
             "RSI@tv-basicstudies.RSI.linewidth": 2,
             "RSI@tv-basicstudies.RSI.color": "#FF6B35",
             "RSI@tv-basicstudies.length": 14,

@@ -19,7 +19,7 @@ def add_cors_headers(response):
 # Available trading pairs
 CRYPTO_PAIRS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", 
-    "DOGEUSDT", "MATICUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT"
+    "DOGEUSDT",  "SOLUSDT"
 ]
 
 FOREX_PAIRS = [
