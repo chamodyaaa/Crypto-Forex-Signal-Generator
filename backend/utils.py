@@ -1,24 +1,23 @@
-def validate_indicators(df):
+import numpy as np
 
-    print("\n===== Indicator Validation =====")
 
-    print("\nColumns in DataFrame:")
-    print(df.columns)
+def validate_indicators(df, min_rows=50):
+    """Validate presence and quality of indicator columns before signal generation."""
+    required_cols = ["close", "rsi", "ema_20", "macd", "macd_signal", "macd_histogram"]
 
-    print("\nLast 5 RSI values:")
-    print(df["rsi"].tail())
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing indicator columns: {missing_cols}")
 
-    print("\nLast 5 EMA values:")
-    print(df["ema_20"].tail())
+    if len(df) < min_rows:
+        raise ValueError(f"Insufficient rows for robust indicators: {len(df)} available, need at least {min_rows}")
 
-    print("\nLast 5 MACD values:")
-    print(df["macd"].tail())
+    numeric_view = df[required_cols].tail(10)
+    if numeric_view.isna().any().any():
+        raise ValueError("Recent indicator rows contain missing values")
 
-    print("\nLast 5 MACD Signal values:")
-    print(df["macd_signal"].tail())
+    if not np.isfinite(numeric_view.to_numpy()).all():
+        raise ValueError("Recent indicator rows contain non-finite values")
 
-    print("\nLast 5 MACD Histogram values:")
-    print(df["macd_histogram"].tail())
-
-    print("\nValidation Finished")
+    return True
     

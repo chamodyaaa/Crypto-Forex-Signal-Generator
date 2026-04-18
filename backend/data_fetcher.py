@@ -4,6 +4,10 @@ from binance.client import Client
 from dotenv import load_dotenv
 import os
 
+
+class DataFetchError(Exception):
+    """Raised when upstream market data providers fail or return invalid data."""
+
 # load .env file
 load_dotenv()
 
@@ -27,18 +31,24 @@ API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 
 #Fetch Crypto Data
 
-def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h",limit=500):
+def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h", limit=500):
     binance_client = get_binance_client()
     if binance_client is None:
-        raise Exception("Binance client not available - network connection failed")
-    
-    klines=binance_client.get_klines(
-        symbol=symbol,
-        interval=timeframe,
-        limit=limit
-    )
+        raise DataFetchError("Binance client not available - network connection failed")
 
-    df=pd.DataFrame(klines,columns=[
+    try:
+        klines = binance_client.get_klines(
+            symbol=symbol,
+            interval=timeframe,
+            limit=limit,
+        )
+    except Exception as e:
+        raise DataFetchError(f"Failed to fetch crypto data for {symbol} ({timeframe}): {e}") from e
+
+    if not klines:
+        raise DataFetchError(f"No crypto candle data returned for {symbol} ({timeframe})")
+
+    df = pd.DataFrame(klines, columns=[
         "timestamp",
         "open",
         "high",
@@ -53,11 +63,16 @@ def fetch_crypto_data(symbol="BTCUSDT", timeframe="1h",limit=500):
         "ignore"
     ])
 
-    df=df[["timestamp","open","high","low","close","volume"]]
+    df = df[["timestamp", "open", "high", "low", "close", "volume"]]
 
-    df["timestamp"]=pd.to_datetime(df["timestamp"],unit="ms")
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
-    df[["open","high","low","close","volume"]]=df[["open","high","low","close","volume"]].astype(float)
+    numeric_cols = ["open", "high", "low", "close", "volume"]
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=numeric_cols).copy()
+
+    if df.empty:
+        raise DataFetchError(f"Crypto data for {symbol} contained only invalid numeric values")
 
     return df
 
@@ -70,13 +85,27 @@ def fetch_forex_data(symbol, timeframe="1h", limit=500):
         f"https://api.twelvedata.com/time_series?symbol={symbol}"
         f"&interval={forex_timeframe}&outputsize={limit}&apikey={API_KEY}"
     )
-    response = requests.get(url)
-    data = response.json()
+    last_error = None
+    data = None
+    for _ in range(2):
+        try:
+            response = requests.get(url, timeout=12)
+            response.raise_for_status()
+            data = response.json()
+            break
+        except requests.RequestException as e:
+            last_error = e
+
+    if data is None:
+        raise DataFetchError(f"Forex API request failed for {symbol} ({timeframe}): {last_error}")
+
+    if data.get("status") == "error":
+        raise DataFetchError(f"Forex API error for {symbol}: {data.get('message', 'Unknown error')}")
 
     if "values" not in data:
-        raise Exception(f"Error fetching forex data: {data}")
+        raise DataFetchError(f"No forex values returned for {symbol} ({timeframe}): {data}")
      
-    df=pd.DataFrame(data["values"])
+    df = pd.DataFrame(data["values"])
 
     # Rename column
     df.rename(columns={"datetime":"timestamp"}, inplace=True)
@@ -85,15 +114,18 @@ def fetch_forex_data(symbol, timeframe="1h", limit=500):
     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
     # Ensure correct column order (forex doesn't have volume)
-    df = df[["timestamp","open","high","low","close"]]
+    df = df[["timestamp", "open", "high", "low", "close"]]
 
     # Convert numeric columns
-    df[["open","high","low","close"]] = df[
-        ["open","high","low","close"]
-    ].astype(float)
+    numeric_cols = ["open", "high", "low", "close"]
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=numeric_cols).copy()
 
     # Sort ascending
     df = df.sort_values("timestamp")
+
+    if df.empty:
+        raise DataFetchError(f"Forex data for {symbol} contained only invalid numeric values")
 
     return df
 
@@ -129,8 +161,7 @@ def get_market_data(asset_type, symbol, timeframe):
     if asset_type.lower() == "crypto":
         return fetch_crypto_data(symbol, timeframe)
 
-    elif asset_type.lower() == "forex":
+    if asset_type.lower() == "forex":
         return fetch_forex_data(symbol, timeframe)
 
-    else:
-        raise ValueError("asset_type must be 'crypto' or 'forex'")
+    raise ValueError("asset_type must be 'crypto' or 'forex'")

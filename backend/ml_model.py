@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, train_test_split
 
 from data_fetcher import get_market_data
 from indicators import calculate_ema, calculate_macd, calculate_rsi
@@ -17,9 +17,12 @@ FEATURE_COLUMNS = [
 	"close",
 	"rsi",
 	"ema_20",
+	"ema_50",
 	"macd",
 	"macd_signal",
 	"macd_histogram",
+	"return_1",
+	"volatility_10",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +45,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 	"""Add technical indicators required for feature engineering."""
 	result = calculate_rsi(df, period=14, price_col="close")
 	result = calculate_ema(result, span=20, price_col="close", output_col="ema_20")
+	result = calculate_ema(result, span=50, price_col="close", output_col="ema_50")
 	result = calculate_macd(result, price_col="close")
+	result["return_1"] = result["close"].pct_change()
+	result["volatility_10"] = result["return_1"].rolling(10).std()
 	return result
 
 
@@ -106,39 +112,47 @@ def train_model(dataset: pd.DataFrame) -> tuple[CalibratedClassifierCV, dict[str
 		stratify=y if y.nunique() > 1 else None,
 	)
 
-	# Calculate class weights to handle imbalance
-	from sklearn.utils.class_weight import compute_class_weight
-	import numpy as np
-	
-	unique_classes = np.array(sorted(y_train.unique()))
-	class_weights = compute_class_weight(
-		'balanced',
-		classes=unique_classes,
-		y=y_train
-	)
-	class_weight_dict = dict(zip(unique_classes, class_weights))
-
 	base_model = RandomForestClassifier(
-		n_estimators=300,
-		max_depth=10,
-		min_samples_split=5,
 		random_state=42,
-		class_weight=class_weight_dict,  # Apply class weights
+		class_weight="balanced_subsample",
+		n_jobs=-1,
 	)
+
+	# Time-series aware tuning on training split only.
+	search_space = {
+		"n_estimators": [200, 300, 400, 500],
+		"max_depth": [6, 8, 10, 12, None],
+		"min_samples_split": [2, 5, 10],
+		"min_samples_leaf": [1, 2, 4],
+		"max_features": ["sqrt", "log2", None],
+	}
+
+	tscv = TimeSeriesSplit(n_splits=4)
+	search = RandomizedSearchCV(
+		estimator=base_model,
+		param_distributions=search_space,
+		n_iter=12,
+		scoring="f1_weighted",
+		cv=tscv,
+		random_state=42,
+		n_jobs=-1,
+	)
+	search.fit(X_train, y_train)
+	tuned_model = search.best_estimator_
 	class_counts = y_train.value_counts()
 	min_class_count = int(class_counts.min()) if not class_counts.empty else 0
 
 	if min_class_count >= 2:
 		cv_folds = min(5, min_class_count)
 		model = CalibratedClassifierCV(
-			estimator=base_model,
+			estimator=tuned_model,
 			method="sigmoid",
 			cv=cv_folds,
 		)
 		model.fit(X_train, y_train)
 	else:
-		base_model.fit(X_train, y_train)
-		model = base_model
+		tuned_model.fit(X_train, y_train)
+		model = tuned_model
 
 	y_pred = model.predict(X_test)
 	accuracy = accuracy_score(y_test, y_pred)
