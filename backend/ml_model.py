@@ -1,0 +1,271 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import joblib
+import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, train_test_split
+
+from data_fetcher import get_market_data
+from indicators import calculate_ema, calculate_macd, calculate_rsi
+
+
+FEATURE_COLUMNS = [
+	"close",
+	"rsi",
+	"ema_20",
+	"ema_50",
+	"macd",
+	"macd_signal",
+	"macd_histogram",
+	"return_1",
+	"volatility_10",
+]
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_model_path(file_path: str) -> Path:
+	"""Resolve model paths relative to the project root by default."""
+	path = Path(file_path)
+	if path.is_absolute():
+		return path
+
+	cwd_path = Path.cwd() / path
+	if cwd_path.exists():
+		return cwd_path
+
+	return PROJECT_ROOT / path
+
+
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+	"""Add technical indicators required for feature engineering."""
+	result = calculate_rsi(df, period=14, price_col="close")
+	result = calculate_ema(result, span=20, price_col="close", output_col="ema_20")
+	result = calculate_ema(result, span=50, price_col="close", output_col="ema_50")
+	result = calculate_macd(result, price_col="close")
+	result["return_1"] = result["close"].pct_change()
+	result["volatility_10"] = result["return_1"].rolling(10).std()
+	return result
+
+
+def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
+	"""Create rule-based labels: 1=buy, -1=sell, 0=hold - Balanced with dual EMA."""
+	result = df.copy()
+
+	# BUY: Price momentum + RSI + dual EMA alignment
+	buy_rule = (
+		((result["rsi"] < 40) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_20"])) |  # Oversold + bullish momentum + above EMA20
+		((result["rsi"] < 35) & (result["macd"] > result["macd_signal"])) |  # Very oversold + MACD bullish
+		((result["rsi"] > 50) & (result["rsi"] < 65) & (result["macd"] > result["macd_signal"]) & (result["close"] > result["ema_50"]) & (result["return_1"] > 0))  # Strong bullish trend with both EMAs
+	)
+	
+	# SELL: Price momentum + RSI + dual EMA alignment  
+	sell_rule = (
+		((result["rsi"] > 60) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_20"])) |  # Overbought + bearish momentum + below EMA20
+		((result["rsi"] > 65) & (result["macd"] < result["macd_signal"])) |  # Very overbought + MACD bearish
+		((result["rsi"] > 35) & (result["rsi"] < 50) & (result["macd"] < result["macd_signal"]) & (result["close"] < result["ema_50"]) & (result["return_1"] < 0))  # Strong bearish trend with both EMAs
+	)
+
+	result["label"] = 0  # Default to HOLD
+	result.loc[sell_rule, "label"] = -1  # Apply SELL
+	result.loc[buy_rule & ~sell_rule, "label"] = 1  # Apply BUY if not SELL
+
+	return result
+
+
+def prepare_dataset(
+	asset_type: str = "crypto",
+	symbol: str = "BTCUSDT",
+	timeframe: str = "1h",
+	limit: int = 1000,
+) -> pd.DataFrame:
+	"""Fetch market data and return a labeled dataset ready for ML."""
+	df = get_market_data(asset_type=asset_type, symbol=symbol, timeframe=timeframe)
+
+	# Align to requested dataset size when source API provides more rows.
+	if limit > 0 and len(df) > limit:
+		df = df.tail(limit).copy()
+
+	df = add_indicators(df)
+	df = generate_labels(df)
+
+	# Remove warm-up rows where indicators are not fully initialized.
+	df = df.dropna(subset=FEATURE_COLUMNS + ["label"]).copy()
+
+	return df
+
+
+def train_model(dataset: pd.DataFrame) -> tuple[CalibratedClassifierCV, dict[str, float], str]:
+	"""Train and evaluate a calibrated Random Forest classifier."""
+	X = dataset[FEATURE_COLUMNS]
+	y = dataset["label"]
+
+	X_train, X_test, y_train, y_test = train_test_split(
+		X,
+		y,
+		test_size=0.2,
+		random_state=42,
+		stratify=y if y.nunique() > 1 else None,
+	)
+
+	base_model = RandomForestClassifier(
+		random_state=42,
+		class_weight="balanced_subsample",
+		n_jobs=-1,
+	)
+
+	# Time-series aware tuning on training split only.
+	search_space = {
+		"n_estimators": [200, 300, 400, 500],
+		"max_depth": [6, 8, 10, 12, None],
+		"min_samples_split": [2, 5, 10],
+		"min_samples_leaf": [1, 2, 4],
+		"max_features": ["sqrt", "log2", None],
+	}
+
+	tscv = TimeSeriesSplit(n_splits=4)
+	search = RandomizedSearchCV(
+		estimator=base_model,
+		param_distributions=search_space,
+		n_iter=12,
+		scoring="f1_weighted",
+		cv=tscv,
+		random_state=42,
+		n_jobs=-1,
+	)
+	search.fit(X_train, y_train)
+	tuned_model = search.best_estimator_
+	class_counts = y_train.value_counts()
+	min_class_count = int(class_counts.min()) if not class_counts.empty else 0
+
+	if min_class_count >= 2:
+		cv_folds = min(5, min_class_count)
+		model = CalibratedClassifierCV(
+			estimator=tuned_model,
+			method="sigmoid",
+			cv=cv_folds,
+		)
+		model.fit(X_train, y_train)
+	else:
+		tuned_model.fit(X_train, y_train)
+		model = tuned_model
+
+	y_pred = model.predict(X_test)
+	accuracy = accuracy_score(y_test, y_pred)
+	report = classification_report(y_test, y_pred, zero_division=0)
+
+	metrics = {"accuracy": accuracy}
+	return model, metrics, report
+
+
+def save_model(model: CalibratedClassifierCV, file_path: str = "models/model.pkl") -> Path:
+	"""Persist trained model to disk for later inference."""
+	path = _resolve_model_path(file_path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	joblib.dump(model, path)
+	return path
+
+
+def run_training_pipeline(
+	asset_type: str = "crypto",
+	symbol: str = "BTCUSDT",
+	timeframe: str = "1h",
+	limit: int = 1000,
+	model_path: str = "models/model.pkl",
+) -> tuple[CalibratedClassifierCV, dict[str, float], str, Path]:
+	"""End-to-end pipeline: dataset -> labels -> train -> evaluate -> save."""
+	dataset = prepare_dataset(
+		asset_type=asset_type,
+		symbol=symbol,
+		timeframe=timeframe,
+		limit=limit,
+	)
+
+	model, metrics, report = train_model(dataset)
+	saved_path = save_model(model, model_path)
+
+	return model, metrics, report, saved_path
+
+
+if __name__ == "__main__":
+	_, metrics, report, saved_path = run_training_pipeline(
+		asset_type="crypto",
+		symbol="BTCUSDT",
+		timeframe="1h",
+		limit=1000,
+		model_path="models/model.pkl",
+	)
+
+	print(f"Model accuracy: {metrics['accuracy']:.4f}")
+	print("Classification report:")
+	print(report)
+	print(f"Model saved to: {saved_path}")
+
+#Load Model
+
+def load_model(file_path:str="models/model.pkl"):
+	"""Load saved model from disk"""
+	path = _resolve_model_path(file_path)
+
+	if not path.exists():
+		raise FileNotFoundError(f"Model not found at {file_path}")
+
+	model = joblib.load(path)
+	return model
+
+#Predict Signal
+def predict_signal(model, df: pd.DataFrame) -> int:
+	"""Predict trading signal using the trained model."""
+	# Drop rows with NaN values in required features
+	df_clean = df.dropna(subset=FEATURE_COLUMNS)
+	
+	if df_clean.empty:
+		raise ValueError("No valid data rows after removing NaN values")
+	
+	X = df_clean[FEATURE_COLUMNS].tail(1)
+
+	prediction = model.predict(X)[0]
+
+	return int(prediction)
+
+
+def adjust_confidence(confidence: float, shrink_factor: float = 0.7) -> float:
+	"""Shrink overconfident probabilities toward a neutral 50% baseline."""
+	return 0.5 + (confidence - 0.5) * shrink_factor
+
+#Add Confidence
+
+def predict_with_confidence(
+	model,
+	df: pd.DataFrame
+) -> tuple[str, float]:
+	"""Predict signal and return probability confidence."""
+
+	# Drop rows with NaN values in required features
+	df_clean = df.dropna(subset=FEATURE_COLUMNS)
+	
+	if df_clean.empty:
+		raise ValueError("No valid data rows after removing NaN values")
+
+	X = df_clean[FEATURE_COLUMNS].tail(1)
+
+	prediction = model.predict(X)[0]
+	probabilities = model.predict_proba(X)[0]
+	
+	# Get the index of the predicted class
+	class_index = list(model.classes_).index(prediction)
+	# Get the probability for the predicted class
+	confidence = float(probabilities[class_index])
+
+	if prediction == 1:
+		signal = "BUY"
+	elif prediction == -1:
+		signal = "SELL"
+	else:
+		signal = "HOLD"
+
+	return signal, confidence
