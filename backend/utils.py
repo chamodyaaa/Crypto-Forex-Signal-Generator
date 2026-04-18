@@ -3,7 +3,7 @@ import numpy as np
 
 def validate_indicators(df, min_rows=50):
     """Validate presence and quality of indicator columns before signal generation."""
-    required_cols = ["close", "rsi", "ema_20", "macd", "macd_signal", "macd_histogram"]
+    required_cols = ["close", "rsi", "ema_20", "ema_50", "macd", "macd_signal", "macd_histogram"]
 
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
