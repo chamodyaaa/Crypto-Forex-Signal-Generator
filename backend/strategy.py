@@ -88,18 +88,30 @@ def generate_signal(df: pd.DataFrame) -> dict:
     # ML MODEL PREDICTION
     try:
         model = load_model()
-        ml_signal, raw_confidence = predict_with_confidence(model, df)
-        confidence = adjust_confidence(raw_confidence)
-        # Convert to 0-100 scale for consistency with rule_confidence
-        ml_confidence = confidence * 100
-        print(f"ML Model loaded successfully. Raw confidence: {raw_confidence:.4f}, Adjusted: {confidence:.4f}, ML Confidence %: {ml_confidence:.2f}")
+        # Check if all required features exist
+        from ml_model import FEATURE_COLUMNS
+        missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
+        if missing_features:
+            print(f"WARNING: Missing features for ML model: {missing_features}")
+            print(f"Available columns: {df.columns.tolist()}")
+            ml_signal = signal
+            ml_confidence = 0
+            confidence = 0
+        else:
+            ml_signal, raw_confidence = predict_with_confidence(model, df)
+            confidence = adjust_confidence(raw_confidence)
+            # Convert to 0-100 scale for consistency with rule_confidence
+            ml_confidence = confidence * 100
+            print(f"ML Model loaded successfully. Raw confidence: {raw_confidence:.4f}, Adjusted: {confidence:.4f}, ML Confidence %: {ml_confidence:.2f}")
     except FileNotFoundError:
         print("WARNING: Model not found. Using rule-based confidence only.")
         ml_signal = signal  # Use rule-based signal as fallback
         ml_confidence = 0  # No ML confidence if model not available
         confidence = 0
     except Exception as e:
-        print(f"ERROR loading ML model: {e}. Using rule-based confidence only.")
+        import traceback
+        print(f"ERROR loading ML model: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
         ml_signal = signal  # Use rule-based signal as fallback
         ml_confidence = 0  # No ML confidence if model fails
         confidence = 0
